@@ -1,10 +1,9 @@
 # uefi-framework
 
 A freestanding **x64 UEFI application framework** — MSVC-built, zero dependencies, no EDK II.
-We use it to run our own code **before the operating system exists**: poking the boot chain and
-Secure Boot variables (PK/db/dbx) at the UEFI stage, where Windows-side tools can't reach.
-This is not a study project — the goal is to ship a working hack, so the framework is kept
-minimal and boring on purpose.
+It exists to get your own code running **before the operating system does**: the UEFI stage,
+where Windows-side tooling can't reach. Everything here is kept minimal and boring on purpose,
+so experiments stay cheap to try.
 
 If you can build a C++ exe in Visual Studio, you can build and flash this in five minutes
 (see [Quick start](#quick-start)).
@@ -13,7 +12,7 @@ If you can build a C++ exe in Visual Studio, you can build and flash this in fiv
 
 EDK II is an ecosystem: build tools, packages, PYTHON, a DSC/FDF ceremony. We want one `.efi`,
 F5 in Visual Studio, copy to a USB stick, reboot. This repo is ~40 headers and a handful of
-`.cxx` files. Everything you need at the UEFI stage is here; add what you need as you hack.
+`.cxx` files. Everything you need at the UEFI stage is here; add what you need as you go.
 
 ## What's inside
 
@@ -57,11 +56,11 @@ msbuild uefi-framework.sln /p:Configuration=Release /p:Platform=x64
   no renaming, just re-copy and re-run).
 - From the **boot menu fallback**: name it `\EFI\BOOT\BOOTX64.EFI` on the stick.
 
-⚠ **Secure Boot**: an unsigned `.efi` is refused while SB is enforced. Either disable Secure
-Boot in firmware for development, or run on a machine where we already own the PK (that's
-part of the plan — see [What we're hacking](#what-were-hacking)).
+⚠ **Secure Boot**: an unsigned `.efi` is refused while SB is enforced. For development either
+disable Secure Boot in firmware on the test box, or run with custom keys enrolled (the
+framework's Runtime Services wrappers cover variable access once you do).
 
-## Writing your first hack
+## Writing your first app
 
 `source/entry.cxx` starts clean:
 
@@ -74,13 +73,13 @@ efi_status_t EfiMain(efi_handle image_handle, efi::system_table* system_table) {
     // text console:
     g_ctx.con_out()->output_string(u"hello from uefi-framework\n");
 
-    // runtime services — e.g. read a Secure Boot variable:
+    // runtime services — e.g. read a firmware variable:
     constexpr auto efi_global_variable =
         efi::make_guid(0x8BE4DF61, 0x93CA, 0x11D2, 0xAA, 0x0D, 0x00, 0xE0, 0x98, 0x03, 0x2B, 0x8C);
 
     std::uint32_t attrs = 0;
     std::uintptr_t sz = 0;
-    g_ctx.runtime_services()->get_variable(u"PK", const_cast<efi_guid*>(&efi_global_variable),
+    g_ctx.runtime_services()->get_variable(u"SecureBoot", const_cast<efi_guid*>(&efi_global_variable),
                                            &attrs, &sz, nullptr);   // -> buffer_too_small, sz filled
     // ... allocate sz, call again, done.
 
@@ -111,7 +110,7 @@ nobody to tell you. Wire `println` before each stage.
 // IDA-style pattern scan over any buffer/image range:
 auto* tgt = ztils::scan_as<void*>(base, size, "48 8B ?? 48 89 5C ?? ?? 57 48 83 EC ?? 48 8B DA");
 
-// PE walking (e.g. bootmgfw.efi / winsloader mapped into memory):
+// PE walking (any image mapped into memory — EFI apps, OS loaders, drivers):
 if (ztils::pe_valid(base)) {
     auto text = ztils::get_section(base, ".text");
     auto* exp = ztils::get_export(base, "EfiMain");
@@ -135,17 +134,17 @@ hk.disable();                          // restore + re-enable later
 - Status codes: check `efi::status_codes`, never assume success from boot services.
 - `build/`, `.vs/`, `*.vcxproj.user` are gitignored — never commit them.
 
-## What we're hacking
+## What this is for
 
-Motivation for this framework (context for the research, not an EDK tutorial):
+Typical uses this framework was built around:
 
-- **Own the keys before the OS does.** The endgame is manipulating Secure Boot key material
-  (PK/db/dbx) from the UEFI stage itself — Runtime Services are right there, no
-  `SetFirmwareEnvironmentVariable` privileges dance, no vendor tool dependency.
-- **Boot-chain surgery.** `pe_util` + `pattern_scan` + `detour_hook` are exactly the kit for
-  mapping `bootmgfw.efi`/`winload.efi` yourself, finding the interesting exports/code regions,
-  and detouring them — see the `bootmgfw` hint in `detour_hook.h`.
-- **Anti-cheat / early-boot questions** we can only answer with code that runs at tick 0:
-  what a driver in our position can see and change before any OS-resident agent exists.
+- **Firmware variable work.** Read/append/set UEFI variables — including the Secure Boot key
+  databases — straight through Runtime Services, without OS-side privilege dance or vendor
+  tools.
+- **Live PE analysis.** `pe_util` + `pattern_scan` + `detour_hook` give you the same view
+  offline RE tools give you, but against images in live memory at boot time.
+- **Early-environment observation.** Measuring what code at this stage can see and change
+  before any OS-resident component exists — timing, memory maps, protocol inventory.
 
-Anything in this repo may break while we iterate. If it builds and boots, it's fair game.
+Anything in this repo may break while we iterate; that's expected. If it builds and boots,
+send a PR.

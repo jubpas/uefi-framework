@@ -28,6 +28,6 @@ private:
 
 /* how i like using it all at one place cross file use :)
 namespace detour_hooks {
-	inline c_detour_hook bootmgfw{};
+	inline c_detour_hook sample{};
 }
 */
