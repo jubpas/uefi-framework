@@ -1,0 +1,9 @@
+# build outputs
+build/
+[Bb]in/
+[Oo]bj/
+x64/
+
+# Visual Studio local state
+.vs/
+*.vcxproj.user
